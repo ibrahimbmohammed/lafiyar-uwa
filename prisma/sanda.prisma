@@ -1,0 +1,239 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER MODEL
+// ============================================
+model User {
+  id                      String    @id @default(uuid()) @db.Uuid
+  phoneNumber             String    @unique @map("phone_number")
+  fullName                String?   @map("full_name")
+  lga                     String?
+  age                     Int?
+  languagePreference      String    @default("hausa") @map("language_preference")
+  
+  // Pregnancy tracking
+  expectedDeliveryDate    DateTime? @map("expected_delivery_date") @db.Date
+  lastMenstrualPeriod     DateTime? @map("last_menstrual_period") @db.Date
+  pregnancyWeeks          Int?      @map("pregnancy_weeks")
+  
+  // Risk profiling
+  riskScore               Int       @default(0) @map("risk_score")
+  riskCategory            RiskCategory @default(unknown) @map("risk_category")
+  
+  // Status flags
+  isActive                Boolean   @default(true) @map("is_active")
+  registrationCompleted   Boolean   @default(false) @map("registration_completed")
+  
+  // Timestamps
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+  
+  // Relations
+  riskAssessments         RiskAssessment[]
+  eventLogs               EventLog[]
+  emergencyAlerts         EmergencyAlert[]
+  
+  @@map("users")
+}
+
+enum RiskCategory {
+  red
+  yellow
+  green
+  unknown
+}
+
+// ============================================
+// RISK ASSESSMENT MODEL
+// ============================================
+model RiskAssessment {
+  id                            String   @id @default(uuid()) @db.Uuid
+  userId                        String   @map("user_id")
+  assessmentDate                DateTime @default(now()) @map("assessment_date")
+  gestationalAgeWeeks           Int      @map("gestational_age_weeks")
+  
+  // WHO Risk Factors
+  maternalAge                   Int      @map("maternal_age")
+  parity                        Int      @default(0)
+  previousCesarean              Boolean  @default(false) @map("previous_cesarean")
+  previousStillbirth            Boolean  @default(false) @map("previous_stillbirth")
+  previousPretermBirth          Boolean  @default(false) @map("previous_preterm_birth")
+  previousPostpartumHemorrhage  Boolean  @default(false) @map("previous_postpartum_hemorrhage")
+  chronicHypertension           Boolean  @default(false) @map("chronic_hypertension")
+  gestationalHypertension       Boolean  @default(false) @map("gestational_hypertension")
+  preeclampsia                  Boolean  @default(false)
+  diabetes                      Boolean  @default(false)
+  gestationalDiabetes           Boolean  @default(false) @map("gestational_diabetes")
+  anemia                        Boolean  @default(false)
+  multiplePregnancy             Boolean  @default(false) @map("multiple_pregnancy")
+  malpresentation               Boolean  @default(false)
+  knownFetalAnomaly             Boolean  @default(false) @map("known_fetal_anomaly")
+  
+  // Calculated outputs
+  totalRiskScore                Int      @map("total_risk_score")
+  riskCategory                  RiskCategory @map("risk_category")
+  riskFactorsIdentified         Json     @map("risk_factors_identified")
+  recommendations               Json
+  
+  assessedBy                    String   @default("system") @map("assessed_by")
+  
+  // Timestamps
+  createdAt                     DateTime @default(now()) @map("created_at")
+  updatedAt                     DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  user                          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("risk_assessments")
+}
+
+// ============================================
+// EVENT LOG MODEL
+// ============================================
+model EventLog {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String?   @map("user_id")
+  phoneNumber String?   @map("phone_number")
+  eventType   EventType @map("event_type")
+  eventData   Json      @default("{}") @map("event_data")
+  metadata    Json      @default("{}")
+  ipAddress   String?   @map("ip_address")
+  userAgent   String?   @map("user_agent")
+  
+  createdAt   DateTime  @default(now()) @map("created_at")
+  
+  // Relations
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  @@index([userId])
+  @@index([phoneNumber])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("event_logs")
+}
+
+enum EventType {
+  ussd_session_start
+  ussd_session_end
+  ussd_menu_view
+  user_registration
+  risk_assessment_completed
+  emergency_alert_triggered
+  ivr_call_initiated
+  ivr_call_completed
+  ivr_call_failed
+  sms_sent
+  sms_delivered
+  sms_failed
+  chw_alert_sent
+  facility_alert_sent
+  user_callback_requested
+  education_content_delivered
+}
+
+// ============================================
+// EMERGENCY ALERT MODEL
+// ============================================
+model EmergencyAlert {
+  id              String        @id @default(uuid()) @db.Uuid
+  userId          String        @map("user_id")
+  phoneNumber     String        @map("phone_number")
+  alertType       AlertType     @map("alert_type")
+  latitude        Float?
+  longitude       Float?
+  alertStatus     AlertStatus   @default(pending) @map("alert_status")
+  respondedBy     String?       @map("responded_by")
+  responseTime    DateTime?     @map("response_time")
+  notes           String?
+  
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  
+  // Relations
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([alertStatus])
+  @@index([createdAt])
+  @@map("emergency_alerts")
+}
+
+enum AlertType {
+  labor_complication
+  severe_bleeding
+  severe_pain
+  high_fever
+  reduced_fetal_movement
+  general_emergency
+}
+
+enum AlertStatus {
+  pending
+  acknowledged
+  responded
+  resolved
+  cancelled
+}
+
+// ============================================
+// COMMUNITY RESOURCES MODEL
+// ============================================
+model CommunityResource {
+  id              String         @id @default(uuid()) @db.Uuid
+  resourceType    ResourceType   @map("resource_type")
+  name            String
+  phoneNumber     String         @map("phone_number")
+  lga             String
+  ward            String?
+  latitude        Float?
+  longitude       Float?
+  isActive        Boolean        @default(true) @map("is_active")
+  capacity        String?
+  operatingHours  String?        @map("operating_hours")
+  notes           String?
+  
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  
+  @@index([lga])
+  @@index([resourceType])
+  @@map("community_resources")
+}
+
+enum ResourceType {
+  chw
+  phc
+  transport
+  secondary_facility
+  tertiary_facility
+}
+
+// ============================================
+// IVR CALL LOG MODEL (for Stage 3)
+// ============================================
+model IVRCallLog {
+  id              String      @id @default(uuid()) @db.Uuid
+  userId          String      @map("user_id")
+  phoneNumber     String      @map("phone_number")
+  callType        String      @map("call_type")
+  callDuration    Int?        @map("call_duration")
+  callStatus      String      @map("call_status")
+  audioFile       String?     @map("audio_file")
+  dtmfInput       String?     @map("dtmf_input")
+  
+  createdAt       DateTime    @default(now()) @map("created_at")
+  
+  @@index([userId])
+  @@index([phoneNumber])
+  @@index([createdAt])
+  @@map("ivr_call_logs")
+}

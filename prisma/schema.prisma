@@ -1,0 +1,239 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+//=============================================================================
+// CORE USER MODELS
+//=============================================================================
+
+model User {
+  id                   String     @id @default(uuid()) @db.Uuid
+  phoneNumber          String     @unique @map("phone_number") @db.VarChar(15)
+  name                 String?    @db.VarChar(100)
+  lga                  String?    @db.VarChar(50)
+  village              String?    @db.VarChar(100)
+  expectedDeliveryDate DateTime?  @map("expected_delivery_date") @db.Date
+  age                  Int?
+  riskProfile          RiskLevel? @default(low) @map("risk_profile")
+  riskScore            Int        @default(0) @map("risk_score")
+  assignedChwId        String?    @map("assigned_chw_id") @db.Uuid
+  languagePreference   String     @default("hausa") @map("language_preference") @db.VarChar(10)
+  currentWeek          Int        @default(1) @map("current_week")
+  status               UserStatus @default(active)
+  createdAt            DateTime   @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt            DateTime   @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  // Relations
+  riskAssessments RiskAssessment[]
+  eventLogs       EventLog[]
+  chw             CommunityHealthWorker? @relation(fields: [assignedChwId], references: [id])
+  // ADD THESE TWO LINES 👇
+  ivrCallLogs     IvrCallLog[]
+  smsLogs         SmsLog[]
+
+  @@index([phoneNumber], name: "idx_users_phone")
+  @@index([assignedChwId], name: "idx_users_chw")
+  @@index([status], name: "idx_users_status")
+  @@index([riskProfile], name: "idx_users_risk")
+  @@map("users")
+}
+
+model RiskAssessment {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  assessmentDate DateTime @default(now()) @map("assessment_date") @db.Timestamp(6)
+
+  // Risk factors (WHO criteria)
+  ageRisk               Boolean @default(false) @map("age_risk")
+  bpSystolic            Int?    @map("bp_systolic")
+  bpDiastolic           Int?    @map("bp_diastolic")
+  previousComplications Boolean @default(false) @map("previous_complications")
+  gestationalDiabetes   Boolean @default(false) @map("gestational_diabetes")
+  highParity            Boolean @default(false) @map("high_parity")
+  firstPregnancy        Boolean @default(false) @map("first_pregnancy")
+  multiplePregnancy     Boolean @default(false) @map("multiple_pregnancy")
+
+  // Calculated values
+  calculatedRiskLevel RiskLevel @default(low) @map("calculated_risk_level")
+  totalRiskScore      Int       @default(0) @map("total_risk_score")
+
+  // Metadata
+  assessedBy String? @map("assessed_by") @db.VarChar(50)
+  notes      String? @db.Text
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], name: "idx_risk_user")
+  @@index([calculatedRiskLevel], name: "idx_risk_level")
+  @@map("risk_assessments")
+}
+
+model EventLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String?  @map("user_id") @db.Uuid
+  eventType   String   @map("event_type") @db.VarChar(50)
+  eventData   Json?    @map("event_data") @db.JsonB
+  sessionId   String?  @map("session_id") @db.VarChar(100)
+  phoneNumber String?  @map("phone_number") @db.VarChar(15)
+  timestamp   DateTime @default(now()) @db.Timestamp(6)
+
+  // Relations
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([eventType], name: "idx_event_type")
+  @@index([userId], name: "idx_event_user")
+  @@index([timestamp], name: "idx_event_timestamp")
+  @@index([sessionId], name: "idx_event_session")
+  @@map("event_logs")
+}
+
+//=============================================================================
+// COMMUNITY RESOURCES
+//=============================================================================
+
+model CommunityHealthWorker {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(100)
+  phoneNumber String   @unique @map("phone_number") @db.VarChar(15)
+  lga         String   @db.VarChar(50)
+  villages    String[] @db.Text
+  status      String   @default("active") @db.VarChar(20)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  // Relations
+  assignedUsers User[]
+
+  @@index([lga], name: "idx_chw_lga")
+  @@index([phoneNumber], name: "idx_chw_phone")
+  @@map("community_health_workers")
+}
+
+model HealthFacility {
+  id                String   @id @default(uuid()) @db.Uuid
+  name              String   @db.VarChar(200)
+  facilityType      String?  @map("facility_type") @db.VarChar(50)
+  lga               String   @db.VarChar(50)
+  address           String?  @db.Text
+  phoneNumber       String?  @map("phone_number") @db.VarChar(15)
+  latitude          Decimal? @db.Decimal(10, 8)
+  longitude         Decimal? @db.Decimal(11, 8)
+  operationalStatus String   @default("active") @map("operational_status") @db.VarChar(20)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@index([lga], name: "idx_facility_lga")
+  @@map("health_facilities")
+}
+
+model TransportProvider {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(100)
+  phoneNumber String   @unique @map("phone_number") @db.VarChar(15)
+  vehicleType String?  @map("vehicle_type") @db.VarChar(50)
+  lga         String   @db.VarChar(50)
+  areasServed String[] @map("areas_served") @db.Text
+  status      String   @default("active") @db.VarChar(20)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@index([lga], name: "idx_transport_lga")
+  @@map("transport_providers")
+}
+
+//=============================================================================
+// CONTENT & EDUCATION (For Stage 3+)
+//=============================================================================
+
+model ContentLibrary {
+  id                String      @id @default(uuid()) @db.Uuid
+  weekNumber        Int         @map("week_number")
+  contentType       ContentType @map("content_type")
+  titleHausa        String?     @map("title_hausa") @db.VarChar(200)
+  titleEnglish      String?     @map("title_english") @db.VarChar(200)
+  ivrAudioUrl       String?     @map("ivr_audio_url") @db.VarChar(500)
+  smsSummaryHausa   String?     @map("sms_summary_hausa") @db.Text
+  smsSummaryEnglish String?     @map("sms_summary_english") @db.Text
+  createdAt         DateTime    @default(now()) @map("created_at") @db.Timestamp(6)
+
+  ivrCallLogs IvrCallLog[]
+
+  @@unique([weekNumber, contentType], name: "unique_week_content")
+  @@index([weekNumber], name: "idx_content_week")
+  @@map("content_library")
+}
+
+model IvrCallLog {
+  id              String          @id @default(uuid()) @db.Uuid
+  userId          String          @map("user_id") @db.Uuid
+  contentId       String?         @map("content_id") @db.Uuid
+  callInitiatedAt DateTime        @default(now()) @map("call_initiated_at") @db.Timestamp(6)
+  callStatus      CallStatus      @map("call_status")
+  durationSeconds Int?            @map("duration_seconds")
+  userInteraction Json?           @map("user_interaction") @db.JsonB
+  retryCount      Int             @default(0) @map("retry_count")
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content         ContentLibrary? @relation(fields: [contentId], references: [id], onDelete: SetNull)
+
+  @@index([userId], name: "idx_ivr_user")
+  @@index([callStatus], name: "idx_ivr_status")
+  @@map("ivr_call_logs")
+}
+
+model SmsLog {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String?   @map("user_id") @db.Uuid
+  recipientPhone String    @map("recipient_phone") @db.VarChar(15)
+  message        String    @db.Text
+  messageType    String    @map("message_type") @db.VarChar(50)
+  deliveryStatus String    @map("delivery_status") @db.VarChar(20)
+  sentAt         DateTime  @default(now()) @map("sent_at") @db.Timestamp(6)
+  deliveredAt    DateTime? @map("delivered_at") @db.Timestamp(6)
+  cost           Decimal?  @db.Decimal(10, 4)
+  user           User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId], name: "idx_sms_user")
+  @@index([deliveryStatus], name: "idx_sms_status")
+  @@index([messageType], name: "idx_sms_type")
+  @@map("sms_logs")
+}
+
+//=============================================================================
+// ENUMS
+//=============================================================================
+
+enum RiskLevel {
+  low
+  moderate
+  high
+}
+
+enum UserStatus {
+  active
+  delivered
+  inactive
+}
+
+enum ContentType {
+  pregnancy
+  postnatal
+}
+
+enum CallStatus {
+  initiated
+  ringing
+  in_progress
+  completed
+  failed
+  no_answer
+  busy
+}
